@@ -20,46 +20,46 @@ void logMessage(const char* format, ...) {
     }
 }
 
-// TODO: Implement function to search for all nonces from 1 through MAX_NONCE (inclusive) using CUDA Threads
 __global__ void findNonce(size_t current_length,
-						  	BYTE *block_content, 
-						  	BYTE *block_hash, 
-							size_t max_nonce,
-							size_t nonce_size,
-							uint64_t *d_nonce_result) {
-	BYTE difficulty_5_zeros[SHA256_HASH_SIZE] = "0000099999999999999999999999999999999999999999999999999999999999";
+                          BYTE *block_content, 
+                          BYTE *block_hash, 
+                          size_t max_nonce,
+                          size_t nonce_size,
+                          uint64_t *d_nonce_result) {
+    BYTE difficulty_5_zeros[SHA256_HASH_SIZE] = "00000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
 
-	// Calculate global index for the thread
     uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-	// Calculate stride for grid
     uint64_t stride = blockDim.x * gridDim.x;
 
     for (uint64_t nonce = idx; nonce <= max_nonce; nonce += stride) {
-        // Append the nonce directly to the content in a way that avoids standard C string functions
-		// Pointer to where the nonce starts in the block content
-        BYTE *nonce_position = block_content + current_length;
+        BYTE local_block_content[BLOCK_SIZE];
+        memcpy(local_block_content, block_content, current_length);
 
-        for (int i = 0; i < nonce_size; i++) {
-			// Initialize nonce area with '0'
-            nonce_position[i] = '0';
-        }
+        BYTE *nonce_position = local_block_content + current_length;
 
-        // Convert nonce to string and place it into the content, without sprintf
-        int nonce_length = 0;
+        // Clear the nonce area
+        memset(nonce_position, '0', nonce_size);
+
+        // Nonce to ASCII (reversed order)
         uint64_t n = nonce;
+        int digit_count = 0;
         while (n > 0) {
-            nonce_position[nonce_size - 1 - nonce_length++] = '0' + (n % 10);
+            nonce_position[nonce_size - 1 - digit_count++] = '0' + (n % 10);
             n /= 10;
         }
 
-        apply_sha256(block_content, current_length + nonce_size, block_hash, 1);
+        // Calculate hash
+        apply_sha256(local_block_content, current_length + nonce_size, block_hash, 1);
+
+        // Check hash against difficulty
         if (compare_hashes(block_hash, difficulty_5_zeros) == 1) {
-			*d_nonce_result = nonce; 
+            atomicMin((unsigned long long int*)d_nonce_result, (unsigned long long int)nonce);
             break;
         }
     }
 }
+
+
 
 int main(int argc, char **argv) {
     logMessage("Hello World");
