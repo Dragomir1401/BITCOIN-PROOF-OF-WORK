@@ -20,45 +20,33 @@ void logMessage(const char* format, ...) {
     }
 }
 
-__global__ void findNonce(size_t current_length,
-                          BYTE *block_content, 
+__global__ void findNonce(BYTE *block_content, 
                           BYTE *block_hash, 
-                          size_t max_nonce,
-                          size_t nonce_size,
-                          uint64_t *d_nonce_result) {
-    BYTE difficulty_5_zeros[SHA256_HASH_SIZE] = "00000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
-
+                          uint64_t *d_nonce_result)
+{
+    BYTE difficulty_5_zeros[SHA256_HASH_SIZE] = "0000099999999999999999999999999999999999999999999999999999999999";
     uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    uint64_t stride = blockDim.x * gridDim.x;
 
-    for (uint64_t nonce = idx; nonce <= max_nonce; nonce += stride) {
-        BYTE local_block_content[BLOCK_SIZE];
-        memcpy(local_block_content, block_content, current_length);
+    char nonce_string[NONCE_SIZE + 1];
+    intToString(idx, nonce_string);
 
-        BYTE *nonce_position = local_block_content + current_length;
+    BYTE local_block_content[BLOCK_SIZE + NONCE_SIZE];
+    d_strcpy((char*)local_block_content, (char*)block_content);
+    d_strcpy((char*)local_block_content + BLOCK_SIZE, nonce_string);
 
-        // Clear the nonce area
-        memset(nonce_position, '0', nonce_size);
+    BYTE local_block_hash[SHA256_HASH_SIZE]; 
 
-        // Nonce to ASCII (reversed order)
-        uint64_t n = nonce;
-        int digit_count = 0;
-        while (n > 0) {
-            nonce_position[nonce_size - 1 - digit_count++] = '0' + (n % 10);
-            n /= 10;
-        }
+    // Calculate hash
+    apply_sha256(local_block_content, BLOCK_SIZE + NONCE_SIZE, local_block_hash, 1);
 
-        // Calculate hash
-        apply_sha256(local_block_content, current_length + nonce_size, block_hash, 1);
-
-        // Check hash against difficulty
-        if (compare_hashes(block_hash, difficulty_5_zeros) == 1) {
-            atomicMin((unsigned long long int*)d_nonce_result, (unsigned long long int)nonce);
-            break;
-        }
+    // Check hash against difficulty
+    if (compare_hashes(local_block_hash, difficulty_5_zeros) <= 0) {
+        printf("Hash found: %s\n", local_block_hash);
+        *d_nonce_result = idx;
+        d_strcpy((char*)block_hash, (char*)local_block_hash);
+        return;
     }
 }
-
 
 
 int main(int argc, char **argv) {
@@ -103,18 +91,26 @@ int main(int argc, char **argv) {
 	size_t current_length = strlen((char*) block_content);
 
 	// Copy block content to GPU
-    size_t block_size = sizeof(block_content); // Make sure this is defined correctly
+    size_t block_size = sizeof(block_content);
     cudaMalloc((void**)&d_block_content, block_size);
     cudaMemcpy(d_block_content, block_content, block_size, cudaMemcpyHostToDevice);
 
-    dim3 blockSize(256); // Example block size
+    dim3 blockSize(256);
     dim3 gridSize((MAX_NONCE + blockSize.x - 1) / blockSize.x);
 
     cudaEvent_t start, stop;
     startTiming(&start, &stop);
-
     logMessage("Starting kernel");
-    findNonce<<<gridSize, blockSize>>>(current_length, d_block_content, d_block_hash, MAX_NONCE, NONCE_SIZE, d_nonce_result);
+    logMessage("Block size: %zu", block_size);
+    logMessage("Grid size: %d", gridSize.x);
+    logMessage("Block size: %d", blockSize.x);
+    logMessage("Current length: %zu", current_length);
+    logMessage("Block content: %s", block_content);
+
+    findNonce<<<gridSize, blockSize>>>(d_block_content, d_block_hash, d_nonce_result);
+    
+    logMessage("Kernel finished");
+    float seconds = stopTiming(&start, &stop);
 
     cudaDeviceSynchronize();
     cudaError_t error = cudaGetLastError();
@@ -123,7 +119,6 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    logMessage("Kernel finished");
     logMessage("Kernel error check done");
 
     // Copy nonce back to host
@@ -133,10 +128,9 @@ int main(int argc, char **argv) {
     // Copy block hash back to host and print
     BYTE host_block_hash[SHA256_HASH_SIZE];
     cudaMemcpy(host_block_hash, d_block_hash, SHA256_HASH_SIZE, cudaMemcpyDeviceToHost);
-    host_block_hash[SHA256_HASH_SIZE - 1] = '\0'; // Ensure null-termination
+    host_block_hash[SHA256_HASH_SIZE - 1] = '\0';
     logMessage("Block hash: %s", host_block_hash);
 
-    float seconds = stopTiming(&start, &stop);
     printResult(host_block_hash, nonce, seconds);
 
     // Free device memory
