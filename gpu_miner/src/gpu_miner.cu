@@ -47,7 +47,9 @@ __global__ void findNonce(BYTE *block_content,
 
 
 int main(int argc, char **argv) {
+    // Copy to file global difficulty 5 zeros template
     cudaMemcpyToSymbol(global_difficulty_5_zeros, DIFFICULTY, SHA256_HASH_SIZE);
+
     BYTE hashed_tx1[SHA256_HASH_SIZE],
         hashed_tx2[SHA256_HASH_SIZE],
         hashed_tx3[SHA256_HASH_SIZE],
@@ -71,7 +73,6 @@ int main(int argc, char **argv) {
     cudaMemset(d_nonce_result, 0, sizeof(uint64_t));
     cudaMemset(d_block_hash, 0, SHA256_HASH_SIZE);
 
-
 	// Calculate top hash
 	apply_sha256(tx1, strlen((const char*)tx1), hashed_tx1, 1);
 	apply_sha256(tx2, strlen((const char*)tx2), hashed_tx2, 1);
@@ -93,9 +94,9 @@ int main(int argc, char **argv) {
 	size_t current_length = strlen((char*) block_content);
 
 	// Copy block content to GPU
-    size_t block_size = sizeof(block_content);
-    cudaMalloc((void**)&d_block_content, block_size);
-    cudaMemcpy(d_block_content, block_content, block_size, cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&d_block_content, BLOCK_SIZE);
+    cudaMemcpy(d_block_content, block_content, BLOCK_SIZE, cudaMemcpyHostToDevice);
+    printf("Block content: %s\n", block_content);
 
     // Declare and initialize grid and block sizes
     dim3 blockSize(256);
