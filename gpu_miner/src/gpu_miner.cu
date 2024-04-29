@@ -6,6 +6,8 @@
 #include <inttypes.h>
 #include <stdarg.h>
 
+__device__ bool global_found = false;
+
 void logMessage(const char* format, ...) {
     FILE *fp = fopen("errors.log", "a");
     if (fp != NULL) {
@@ -24,6 +26,10 @@ __global__ void findNonce(BYTE *block_content,
                           BYTE *block_hash, 
                           uint64_t *d_nonce_result)
 {
+    if (global_found) {
+        return;
+    }
+
     BYTE difficulty_5_zeros[SHA256_HASH_SIZE] = "0000099999999999999999999999999999999999999999999999999999999999";
     uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -42,6 +48,7 @@ __global__ void findNonce(BYTE *block_content,
     // Check hash against difficulty
     if (compare_hashes(local_block_hash, difficulty_5_zeros) <= 0) {
         printf("Hash found: %s\n", local_block_hash);
+        global_found = true;
         *d_nonce_result = idx;
         d_strcpy((char*)block_hash, (char*)local_block_hash);
         return;
