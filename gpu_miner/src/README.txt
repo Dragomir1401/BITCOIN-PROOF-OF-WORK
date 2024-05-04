@@ -71,7 +71,7 @@ was to understand how to allocate memory on the GPU and how to correctly apply t
     The time it took to find the solution is: 0.01 seconds
 
     The results has 5 leading zeros as intended. The hash of the content was tested using an online tool
-and it was correct. The time it took to find the solution was very fast, under 0.01 seconds.
+and it was correct. The time it took to find the solution was very fast, under 0.01 seconds using the cluster.
 
 -------------------------------------References-----------------------------------------------------------
 
