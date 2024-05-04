@@ -1,5 +1,3 @@
-// 00000466c22e6ee57f6ec5a8122e67f82a381499a4b3069869819639bb22a2ee, 515800, 0.01
-
 Nume: Dragomir Andrei
 Grupă: 332CA
 
@@ -35,16 +33,22 @@ in the following way:
     - After the kernel function finishes, it stops the timer and copies the result back to the CPU
     - The final step is to print the result and free the memory
 
-    The kernel function is implemented in the following way:
+    The kernel function uses an atomic counter to check if another thread has already found the solution.
+    The implementation is done in the following way:
 
-    - It first check if another thread has already found the solution
+    - It first check if another thread has already found the solution using the counter
     - Then it calculates the thread index
     - It converts the thread index to a string as nonce
     - It creates a local block content where it copies the block content to not influence other threads
-    - It creates a local block hash where it stores the hash of the block content
+    - It creates a local block hash where it will store the hash of the block content
+    - It checks again if another thread has already found the solution because there is no need to calculate
+        the sha256 hash if we already have a solution
+    - It calculates the sha256 hash of the block content
+    - It checks if the solution was already found to not redo the hash comparison
     - It checks if the hash has the required number of leading zeros
-    - If it has, it sets the solution found flag to true and stores the nonce in the global memory
-    - Then it returns
+    - If it has, it increments the atomic counter and blocks other threads from
+        entering this part of the code to ensure the block hash and nonce result are set by the same thread
+    - If the nonce result was not set yet as an extra precaution, it sets the block hash and the nonce result
 
 
     

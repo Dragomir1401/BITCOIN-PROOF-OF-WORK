@@ -6,7 +6,7 @@
 #include <inttypes.h>
 #include <stdarg.h>
 
-__device__ bool global_found = false;
+__device__ int atomic_found = 0;
 __device__ BYTE global_difficulty_5_zeros[SHA256_HASH_SIZE];
 
 __global__ void findNonce(BYTE *block_content, 
@@ -14,12 +14,13 @@ __global__ void findNonce(BYTE *block_content,
                             uint64_t *d_nonce_result,
                             size_t current_length)
 {
-    // If nonce is found by another thread, return
-    if (global_found) {
+
+    // If the atomic_found is set to 1, return
+    if (atomic_found == 1) {
         return;
     }
 
-    // Get thread index
+    // Get the thread index
     uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Convert index to string
@@ -31,17 +32,37 @@ __global__ void findNonce(BYTE *block_content,
     d_strcpy((char*)local_block_content, (char*)block_content);
     d_strcpy((char*)local_block_content + current_length, nonce_string);
 
+    // Check again the atomic_found to ensure the time consuming sha256 is not executed
+    // if the hash is already found
+    if (atomic_found == 1) {
+        return;
+    }
+
     // Calculate hash
     BYTE local_block_hash[SHA256_HASH_SIZE]; 
     apply_sha256(local_block_content, d_strlen((char*)local_block_content), local_block_hash, 1);
 
+    // If the atomic_found is set to 1, don't check the hash with this thread because 
+    // another thread has already found the hash
+    if (atomic_found == 1) {
+        return;
+    }
+
     // Check hash against difficulty
     if (compare_hashes(local_block_hash, global_difficulty_5_zeros) <= 0) {
-        printf("Hash found: %s\n", local_block_hash);
-        global_found = true;
-        *d_nonce_result = idx;
-        d_strcpy((char*)block_hash, (char*)local_block_hash);
-        return;
+        // Try setting the atomic_found to 1, ensuring only one thread can proceed
+        if (atomicCAS(&atomic_found, 0, 1) == 0) {
+            printf("Hash found: %s\n", local_block_hash);
+
+            // Double-check if another thread has not already written the result
+            if (*d_nonce_result == 0) {
+                // Write the nonce result
+                *d_nonce_result = idx;
+
+                // Write the block hash
+                d_strcpy((char*)block_hash, (char*)local_block_hash);
+            }
+        }
     }
 }
 
