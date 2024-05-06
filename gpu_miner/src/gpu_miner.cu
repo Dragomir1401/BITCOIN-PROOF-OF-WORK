@@ -9,8 +9,8 @@
 __device__ int atomic_found = 0;
 __device__ BYTE global_difficulty_5_zeros[SHA256_HASH_SIZE];
 
-__global__ void findNonce(BYTE *block_content, 
-                            BYTE *block_hash, 
+__global__ void findNonce(BYTE *block_content,
+                            BYTE *block_hash,
                             uint64_t *d_nonce_result,
                             size_t current_length)
 {
@@ -39,10 +39,10 @@ __global__ void findNonce(BYTE *block_content,
     }
 
     // Calculate hash
-    BYTE local_block_hash[SHA256_HASH_SIZE]; 
+    BYTE local_block_hash[SHA256_HASH_SIZE];
     apply_sha256(local_block_content, d_strlen((char*)local_block_content), local_block_hash, 1);
 
-    // If the atomic_found is set to 1, don't check the hash with this thread because 
+    // If the atomic_found is set to 1, don't check the hash with this thread because
     // another thread has already found the hash
     if (atomic_found == 1) {
         return;
@@ -68,8 +68,14 @@ __global__ void findNonce(BYTE *block_content,
 
 
 int main(int argc, char **argv) {
+    cudaError_t cudaStatus;
+
     // Copy to file global difficulty 5 zeros template
-    cudaMemcpyToSymbol(global_difficulty_5_zeros, DIFFICULTY, SHA256_HASH_SIZE);
+    cudaStatus = cudaMemcpyToSymbol(global_difficulty_5_zeros, DIFFICULTY, SHA256_HASH_SIZE);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpyToSymbol failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
 
     BYTE hashed_tx1[SHA256_HASH_SIZE],
         hashed_tx2[SHA256_HASH_SIZE],
@@ -87,12 +93,30 @@ int main(int argc, char **argv) {
     uint64_t *d_nonce_result, nonce = 0;
 
     // Allocate memory on device
-    cudaMalloc((void**)&d_block_hash, SHA256_HASH_SIZE);
-    cudaMalloc((void**)&d_nonce_result, sizeof(uint64_t));
+    cudaStatus = cudaMalloc((void**)&d_block_hash, SHA256_HASH_SIZE);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
+
+    cudaStatus = cudaMalloc((void**)&d_nonce_result, sizeof(uint64_t));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
 
     // Initialize device memory
-    cudaMemset(d_nonce_result, 0, sizeof(uint64_t));
-    cudaMemset(d_block_hash, 0, SHA256_HASH_SIZE);
+    cudaStatus = cudaMemset(d_nonce_result, 0, sizeof(uint64_t));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemset failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
+
+    cudaStatus = cudaMemset(d_block_hash, 0, SHA256_HASH_SIZE);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemset failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
 
 	// Calculate top hash
 	apply_sha256(tx1, strlen((const char*)tx1), hashed_tx1, 1);
@@ -115,8 +139,17 @@ int main(int argc, char **argv) {
 	size_t current_length = strlen((char*) block_content);
 
 	// Copy block content to GPU
-    cudaMalloc((void**)&d_block_content, BLOCK_SIZE);
-    cudaMemcpy(d_block_content, block_content, BLOCK_SIZE, cudaMemcpyHostToDevice);
+    cudaStatus = cudaMalloc((void**)&d_block_content, BLOCK_SIZE);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
+
+    cudaStatus = cudaMemcpy(d_block_content, block_content, BLOCK_SIZE, cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
     printf("Block content: %s\n", block_content);
 
     // Declare and initialize grid and block sizes
@@ -130,25 +163,53 @@ int main(int argc, char **argv) {
     // Call kernel
     findNonce<<<gridSize, blockSize>>>(d_block_content, d_block_hash, d_nonce_result, current_length);
     cudaDeviceSynchronize();
-    
+
+    cudaStatus = cudaGetLastError();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "findNonce kernel failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
+
     // Stop timing
     float seconds = stopTiming(&start, &stop);
 
     // Copy nonce back to host
-    cudaMemcpy(&nonce, d_nonce_result, sizeof(uint64_t), cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(&nonce, d_nonce_result, sizeof(uint64_t), cudaMemcpyDeviceToHost);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
 
     // Copy block hash back to host and print
     BYTE host_block_hash[SHA256_HASH_SIZE];
-    cudaMemcpy(host_block_hash, d_block_hash, SHA256_HASH_SIZE, cudaMemcpyDeviceToHost);
+    cudaStatus = cudaMemcpy(host_block_hash, d_block_hash, SHA256_HASH_SIZE, cudaMemcpyDeviceToHost);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
     host_block_hash[SHA256_HASH_SIZE - 1] = '\0';
 
     // Print result
     printResult(host_block_hash, nonce, seconds);
 
     // Free device memory
-    cudaFree(d_block_content);
-    cudaFree(d_block_hash);
-    cudaFree(d_nonce_result);
+    cudaStatus = cudaFree(d_block_content);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaFree failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
+
+    cudaStatus = cudaFree(d_block_hash);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaFree failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
+
+    cudaStatus = cudaFree(d_nonce_result);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaFree failed: %s\n", cudaGetErrorString(cudaStatus));
+        return 1;
+    }
 
     return 0;
 }
