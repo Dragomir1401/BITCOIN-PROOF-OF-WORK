@@ -50,6 +50,12 @@ in the following way:
         entering this part of the code to ensure the block hash and nonce result are set by the same thread
     - If the nonce result was not set yet as an extra precaution, it sets the block hash and the nonce result
 
+    The block size is set as 256 threads and the grid size is calculated as follows:
+
+    dim3 gridSize((MAX_NONCE + blockSize.x - 1) / blockSize.x)
+
+    The reason for this is to ensure that the grid size is big enough to cover all the possible nonces based on
+the block size. The block size is set as 256 threads because it is a good number for the GPU to work efficiently.
 
     
 -------------------------------------Comments-------------------------------------------------------------
@@ -68,10 +74,13 @@ was to understand how to allocate memory on the GPU and how to correctly apply t
 
     The hash that is first found is: 00000466c22e6ee57f6ec5a8122e67f82a381499a4b3069869819639bb22a2ee
     The nonce that was found is: 515800
-    The time it took to find the solution is: 0.01 seconds
+    The time it took to find the solution is: under 0.1 seconds
 
     The results has 5 leading zeros as intended. The hash of the content was tested using an online tool
-and it was correct. The time it took to find the solution was very fast, under 0.01 seconds using the cluster.
+and it was correct. The time it took to find the solution was very fast, under 0.1 seconds using the cluster.
+The time results indicate a good choosing of the block size and grid size for the current problem, as each
+thread only searches for one nonce and computes the sha256 hash of the block content only once. The results
+are consistent with the expected results and the time is consistently under 0.1 seconds.
 
 -------------------------------------References-----------------------------------------------------------
 
